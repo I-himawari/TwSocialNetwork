@@ -1,0 +1,8 @@
+---
+  - hosts: all
+    vars:
+      dir: /srv/twitter
+    become: yes
+    tasks:
+      - name: Git clone
+        git: repo=https://github.com/I-himawari/TwSocialNetwork dest={{ dir }}

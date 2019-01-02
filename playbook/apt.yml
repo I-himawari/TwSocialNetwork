@@ -6,4 +6,4 @@
         apt: name=python3 state=present update_cache=yes
 
       - name: git test
-        git: repo=
+        git: repo=https://github.com/I-himawari/TwSocialNetwork dest=/srv/twitter
