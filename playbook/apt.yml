@@ -3,7 +3,11 @@
     become: yes
     tasks:
       - name: Install python3
-        apt: name=python3 state=present update_cache=yes
-
-      - name: git test
-        git: repo=https://github.com/I-himawari/TwSocialNetwork dest=/srv/twitter
+        apt:
+          name: "{{ packages }}" 
+          state: present 
+          update_cache: yes
+        vars:
+          packages:
+            - python3
+            - python3-pip
