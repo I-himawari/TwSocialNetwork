@@ -1,0 +1,9 @@
+---
+  - hosts: all
+    become: yes
+    tasks:
+      - name: Install python3
+        apt: name=python3 state=present update_cache=yes
+
+      - name: git test
+        git: repo=

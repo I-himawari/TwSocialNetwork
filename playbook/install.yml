@@ -1,0 +1,23 @@
+---
+  - hosts: all
+    become: yes
+    tasks:
+      - name: Download python3.7
+        get_url:
+          url: https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz
+          dest: /usr/local
+      
+      - name: tar for target file
+        unarchive:
+          src: /usr/local/Python-3.7.0.tgz
+          dest: /usr/local
+          remote_src: yes
+
+      - name: preinstall python
+        command: ./configure --prefix=/usr/local/python370 --with-ensurepip chdir=/usr/local/Python-3.7.0/
+
+      - name: intall python(make)
+        command: make chdir=/usr/local/Python-3.7.0/
+
+      - name: install python(make install)
+        command: sudo make install chdir=/usr/local/Python-3.7.0/
