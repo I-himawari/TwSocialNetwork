@@ -20,3 +20,10 @@ I was using TinyDB because simple.
   * Pythonが止まった場合
     * エラーログをSlackに送信する。
     * 取得中のユーザー情報を保存する。
+
+## Slack連携
+
+  * 毎日、0時になったらSlackに取得した総ユーザー数を返す。
+
+
+

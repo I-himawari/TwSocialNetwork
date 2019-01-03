@@ -106,5 +106,5 @@ venv.bak/
 # Hidden API's key
 api-key.yml
 
-# SQLite
-.sqlite
+# Datafile
+db/
