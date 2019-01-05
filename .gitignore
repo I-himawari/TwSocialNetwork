@@ -108,3 +108,4 @@ api-key.yml
 
 # Datafile
 db/
+test_db/

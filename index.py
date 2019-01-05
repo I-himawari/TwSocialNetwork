@@ -1,33 +1,49 @@
 from tinydb import TinyDB, Query, where
 import yaml
-import multiprocessing
-from multiprocessing import Value
+from multiprocessing import Process
 from time import sleep
 import tweepy
 import logging
 from datetime import datetime
 from slack import slack_message, slack_error_message
 import numpy as np
+import traceback
+import sys
+import argparse
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--prod", help="If you run own server, this flag mus set", action="store_true")
+args = parser.parse_args()
 
-datetime.now()
-
-logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
 
 db_follower_name = "db/follower.json"
 db_friend_name = "db/friend.json"
 db_like_name = "db/like.json"
 db_user_name = "db/user.json"
 db_tweet_name = "db/tweet.json"
+
+if not args.prod:
+    db_follower_name = "test_" + db_follower_name
+    db_friend_name = "test_" + db_friend_name
+    db_like_name = "test_" + db_like_name
+    db_user_name = "test_" + db_user_name
+    db_tweet_name = "test_" + db_tweet_name
+    
+
+datetime.now()
+
+logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
+
+
 db_follower = TinyDB(db_follower_name)
 db_friend = TinyDB(db_friend_name)
 db_like = TinyDB(db_like_name)
 db_user = TinyDB(db_user_name)
 db_tweet = TinyDB(db_tweet_name)
-db_query = Query()
 
 f = open("api-key.yml", "r+")
 key = yaml.load(f)
+
 auth = tweepy.OAuthHandler(key["consumer_key"], key["consumer_secret"])
 auth.set_access_token(key["access_token"], key["access_token_secret"])
 
@@ -49,6 +65,8 @@ def db_insert_from_to(_db, _from, _to):
 def db_insert_param(_db, _from, _to):
     return {"time": now_timestamp(), "from": _from, "to": _to}
 
+# c = api.user_timeline(968961194257039360, count=200)
+# page送ってlen(c)が0になったらend。
 
 def get_tweets(process_name, cursor):
     """
@@ -70,30 +88,22 @@ def get_tweets(process_name, cursor):
             logging.info("[%s] Generic Error, restart in 60 seconds: %s" % (process_name, e))
             sleep(60) 
 
-"""
-クラス作るよりdefで組んだ方が手早いし確実だった。
-"""
 
 """
-詳細情報を取得したいユーザー情報を返す。
-1. 既存の詳細情報取得テーブルに、まだ取得してないユーザーを確認する。
-2. 取得していないユーザーがテーブルにない場合、User情報が格納されたDBよりユーザーを捻出する。
-3. 既存のDBが存在しない場合は、ランダムにユーザーIDを指定する。（フォロー・フォローワー関係図→Slackで求める。
-
-フォロー、フォロワーの関連が最も多く、なおかつまだ取得されていないユーザー。
-
-フォローされている数で取得する。何故ならば、価値のあるユーザー尺度としてはかなり優秀だから。
-　　取得したユーザーによるフォロー数で、上位を抽出。
-user <- follower_table_sort_follower_max
-user <- user.user_table_sort_follower_max
-user <- user.random
+フォロー・フォロワー・ツイート・Likeなどの詳細情報取得条件より、最も優先すべきユーザーを返す。
+1. UserDBをUpdateする。
+1. 既存のUserDBにアクセスし、まだ詳細情報を取得していないユーザー一覧を返す。
+2. 1件も取得出来なかった場合、詳細情報取得プログラムの問題と判断し、Slackにメッセージを投げ、10分待つ。
+3. 1件取得した場合はそのまま返す。
+4. 複数件取得した場合は、最適なユーザーを返す関数を通して返す。
 """
 def get_valid_user(select_timestamp):
     user_list = db_user.search(where(select_timestamp) == 0)
+    get_users_detail_in_follower()
 
     # 0件もヒットしなかった場合は、Slackに報告し、ランダムにユーザーを取得する。（お気に入りユーザー検索を続ける）。
     if len(user_list) == 0:
-        slack_error_message("取得対象ユーザーが1件も見つかりませんでした。")
+        slack_error_message("%s 取得対象ユーザーが1件も見つかりませんでした。" % datetime.now())
         sleep(600)
         get_valid_user(select_timestamp)
 
@@ -108,27 +118,88 @@ def get_valid_user(select_timestamp):
     # 4. 最もスコアの多いユーザーを返す。
     else:
         # ユーザーIDと得点の相対表を作っておく。
+        return sort_user_id_by_score(user_list, select_timestamp)
 
-        # 使い慣れてるという理由でnumpy使ってるけど、割と必要性ないと思う。
-        user_id_list = np.array([v["id"] for v in user_list])
-        user_score = np.zeros(len(user_id_list))
-        for t in TIMESTAMP_LIST:
-            user_score += np.array([1 if v[t] != 0 else 0 for v in user_list])
-        
-        user_score += np.array([v["friends_count"] / 2000 for v in user_list])
-
-        return user_id_list[np.argsort(user_score)][0]
 
 """
-follower, friend内で、なおかつ詳細情報を取得していないユーザーの詳細を取得する。
+ユーザーを指定した条件でソートする。
 
-1. ユーザー詳細情報を取得したユーザーID一覧を取得する。
-2. follower, friendのuser_idテーブルを取得する。
+1. 既に他の情報（例えばフォローならフォロワーとか）の取得情報を確認する（具体的にはtimestampが更新されている（0以外）か）。
+他情報が取得されていたら、スコア+1する（優先的に取得する）
+2. フォロワー数に応じたスコアを足す。（フォロワー数/2000）
+3. 最もスコアが高い（np.argsortの逆（[::-1]）代表値（最初（つまり[0]））を取得する。
+"""
+def sort_user_id_by_score(user_list, select_timestamp):
+    user_arange = np.arange(len(user_list))
+    user_score = np.zeros(len(user_arange))
+    for t in [v for v in TIMESTAMP_LIST if v != select_timestamp]:
+        user_score += np.array([1 if v[t] != 0 else 0 for v in user_list])
+    
+    user_score += np.array([v["friends_count"] / 2000 for v in user_list])
+
+    return user_list[user_arange[np.argsort(user_score)[::-1][0]]]
+
+
+"""
+follower, friend内で、User詳細情報を取得していないユーザー一覧を取得する。
+
+1. FFTable <- Follower, FriendのDBよりid一覧
+2. Usertable <- User詳細情報のDBよりid一覧
+3. BeforeTable = FFTable - Usertable
+4. GetTable <- BeforeTable.split(per 100)
+5. Users.append(TwitterAPI(GetTable))
+6. UsersMod <- [AddTimestamp(v) for v in Users]
+7. db.insert_multiple(UsersMod)
+"""
+def diff_ff_table_to_user_table():
+    raw_user_list = [v["to"] for v in db_follower.all()]
+    raw_user_list.extend([v["to"] for v in db_friend.all()])
+    
+    # Usertable <- User詳細情報のDBよりid一覧
+    db_user_list = [v["id"] for v in db_user.all()]
+    
+    return list(set(raw_user_list) - set(db_user_list))
+
+
+"""
+未だ取得していないユーザーの詳細情報を取得する。
+:return: bool API制限などで全ての情報が取得出来ない場合にFalseを返す。
 """
 def get_users_detail_in_follower():
-    pass
+    before_table = diff_ff_table_to_user_table()
+    # FFTable <- Follower, FriendのDBよりid一覧
+    # Fromは詳細情報の存在が確定しているのでToより選択する。
 
+    table_count = 0
+    users = list()
 
+    # Pythonの[]表記は、[開始:終点-1]。
+    while(True):
+        end_point = min(table_count + 100, len(before_table))
+        try:
+            users_api = api.lookup_users(before_table[table_count:end_point])
+        except tweepy.RateLimitError:
+            return False
+        except tweepy.TweepError:
+            slack_error_message(traceback.format_exc())
+            return False
+
+        users.extend(api.lookup_users(before_table[table_count:end_point]))
+
+        # 取得したいユーザー名一覧を座標が超えていたら終了。そうでなければ座標を100（取得数）ずらす。
+        if table_count + 100 > end_point:
+            # tweepyのuserオブジェクト（戻り値）はそのままでは加工出来ない為、dictに変換する（ややこしい）
+            users_dict = [v._json for v in users]
+            set_users_detail(users_dict)
+            return
+        else:
+            table_count += 100
+
+    return True
+    
+
+def lookup_users():
+    return api.lookup_users(screen_names=["vxtuberkarin", "factor_null"])
 
 """
 スクリーン名をユーザーIDに変換する。
@@ -154,7 +225,17 @@ def set_user_detail(user_object):
 
 
 """
-1人のユーザーのフォロー情報を取得する。
+tweepyのユーザーオブジェクトをDBに格納する。（ついでに、ツイートなどの取得情報もつける）
+"""
+def set_users_detail(users_object):
+    for i in range(len(users_object)):
+        for timestamp in TIMESTAMP_LIST:
+            users_object[i][timestamp] = 0
+    db_user.insert_multiple(users_object)
+
+
+"""
+指定したユーザーIDの詳細情報（プロフィールなど）を返す。
 """
 def get_user_detail(username):
     u = api.get_user(username)._json
@@ -183,34 +264,91 @@ def get_user_ff(user_id, follower=True):
 
 
 """
-5つのTwitter APIを制御する。
-get_user_friend, get_user_follower:
-get_user_like:
-get_user_tweet: この辺りは回しっぱ。
+指定したユーザーのツイートもしくはLikeを取得し、DBに格納する。
+"""
+def get_user_action(user_id, page=1, tweet=True):
+    try:
+        select_function = api.user_timeline if tweet else api.favorites
+        c = select_function(user_id=user_id, count=200, page=page)
 
-get_user_detail: デフォルトでは最終動作より5分経過、あるいは叩かれたら（動作フラグがTになったら）動かす。
+        if len(c) == 0:
+            return
+
+        print("%s %s" % (tweet, len(c)))
+
+        c_modify = [v._json for v in c]
+
+        db = db_tweet if tweet else db_like
+        db.insert_multiple(c_modify)
+            
+        get_user_action(user_id, page+1, tweet=tweet)
+
+    except tweepy.RateLimitError:
+        logging.info("[UserTweet] Stop Iteration, process complete")
+        slack_message("[%s]ツイート取得の上限に達しました" % datetime.now())
+        sleep(60 * 15)
+        get_user_action(user_id, page, tweet=tweet)
+
+    except tweepy.TweepError:
+        slack_error_message(traceback.format_exc())
+        return
+
+
+# ユーザーのツイートを取得する。
+def get_user_timeline(user_id, page=1):
+    get_user_action(user_id, page, tweet=True)
+
+
+# ユーザーの好みを取得する。
+def get_user_like(user_id, page=1):
+    get_user_action(user_id, page, tweet=False)
+
+
+# ----------------------------------------- 四騎士関数 -----------------------------------------
+# 取得すべき最適なユーザー情報を返し、実行を繰り返す。
+def four_knight_user_like():
+    while True:
+        get_user_like(get_valid_user("get_like_timestamp"))
+    
+
+def four_knight_user_timeline():
+    while True:
+        get_user_timeline(get_valid_user("get_tweet_timestamp"))
+    
+
+def four_knight_user_friend():
+    while True:
+        get_user_ff(get_valid_user("get_friend_timestamp"), follower=False)
+    
+
+def four_knight_user_follower():
+    while True:
+        get_user_ff(get_valid_user("get_follower_timestamp"), follower=True)
+    
+
+
+
+"""
+1. 最初の1ユーザー情報をDBに格納する。（取得条件が見つからないパターンを防ぐ為）
+2. フォロー・フォロワー・ツイート・Like（以降四騎士）を取得する関数を実行する。
+
+四騎士関数（以降をループする）
+1. 最も取得すべきユーザー情報を返す。
+2. そのユーザーの四騎士などを片っ端から取得する。
+3. 取得し終わるorAPI制限に入ったりした時に、friend/followの詳細情報を取得する。
+4. 全て取得したらループする。
 """
 def runner():
-    wakeup = Value("c_bool", False)  # get_user_detailを動かす為の信号。Trueにしたら動く。user_data_doneがTrueになったのを確認したら、Falseにして戻る。
-    user_data_done = Value("c_bool", False)  # ユーザー詳細データがAPI待機もしくは完全に取得したらTrueにし、
+    get_user_detail(968961194257039360)
+    Process(target=four_knight_user_like())
+    Process(target=four_knight_user_timeline())
+    Process(target=four_knight_user_friend())
+    Process(target=four_knight_user_follower())
 
     # get_user_detailのループを行う。最終動作より5分が経過したら実行させる。
     while True:
-        sleep(100)
-    pass
+        sleep(600)
+        get_users_detail_in_follower()
 
-"""
-TwitterのAPIを指定した時間おきに取得する
-
-最初の1ユーザーを指定する。
-ユーザーの詳細情報（フォロー、フォロワー、ツイート、Like）を取得する。
-フォロー、フォロワーテーブルより、アルゴリズム（既存のユーザーと繋がってる数）に従い次に詳細情報を取得したいユーザーを返す。
-フォロー・フォロワー・ツイート・Likeは別々に計算する為、どれかが早く終わる事がある→1つでも早く終わったら、早めに次のユーザーを返す？（取得結果ごとに候補ユーザーがずれる可能性がある為、候補ユーザーリストを保管する場所が必要と考える。）
-    Python保存：簡単だが、取得ログの保存が出来ない。
-    TinyDB保存（ID, user_id, date(per f, fw, tw, like))：まあ良いと思う。完了したらそれぞれの更新日時をinsertする。Datetime型がないのでTimestampで記録することになる。
-
-基本的にユーザーの取得はuser_id（Twitter側で振られる数字ナンバーのことで、表示されるIDとは独立）の方が望ましい。
-get_first_user
-
-仕様上、複雑に単一プロセスで管理するより、マルチプロセスで動かした方が楽。
-"""
+if __name__ == "__main__":
+    runner()
