@@ -11,11 +11,15 @@ import traceback
 import sys
 import argparse
 
+# ロギング（API取得情報）のログを保存する。
+logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
+
+# 引数に--prodをつけることにより、本番データベースを動かす事が出来る。
 parser = argparse.ArgumentParser()
 parser.add_argument("--prod", help="If you run own server, this flag mus set", action="store_true")
 args = parser.parse_args()
 
-
+# DB保存先
 db_follower_name = "db/follower.json"
 db_friend_name = "db/friend.json"
 db_like_name = "db/like.json"
@@ -28,13 +32,8 @@ if not args.prod:
     db_like_name = "test_" + db_like_name
     db_user_name = "test_" + db_user_name
     db_tweet_name = "test_" + db_tweet_name
-    
 
-datetime.now()
-
-logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
-
-
+# DBの初期化
 db_follower = TinyDB(db_follower_name)
 db_friend = TinyDB(db_friend_name)
 db_like = TinyDB(db_like_name)
