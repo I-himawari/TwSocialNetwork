@@ -166,6 +166,8 @@ def diff_ff_table_to_user_table():
 """
 def get_users_detail_in_follower():
     before_table = diff_ff_table_to_user_table()
+    if len(before_table) == 0:
+        return True
     # FFTable <- Follower, FriendのDBよりid一覧
     # Fromは詳細情報の存在が確定しているのでToより選択する。
 
@@ -273,8 +275,6 @@ def get_user_action(user_id, page=1, tweet=True):
         if len(c) == 0:
             return
 
-        print("%s %s" % (tweet, len(c)))
-
         c_modify = [v._json for v in c]
 
         db = db_tweet if tweet else db_like
@@ -284,7 +284,7 @@ def get_user_action(user_id, page=1, tweet=True):
 
     except tweepy.RateLimitError:
         logging.info("[UserTweet] Stop Iteration, process complete")
-        slack_message("[%s]ツイート取得の上限に達しました" % datetime.now())
+        slack_message("[%s] ツイート取得の上限に達しました" % "Timeline" if tweet else "Like")
         sleep(60 * 15)
         get_user_action(user_id, page, tweet=tweet)
 
@@ -306,21 +306,25 @@ def get_user_like(user_id, page=1):
 # ----------------------------------------- 四騎士関数 -----------------------------------------
 # 取得すべき最適なユーザー情報を返し、実行を繰り返す。
 def four_knight_user_like():
+    print("START USER LIKE")
     while True:
         get_user_like(get_valid_user("get_like_timestamp"))
     
 
 def four_knight_user_timeline():
+    print("START USER TIMELINE")
     while True:
         get_user_timeline(get_valid_user("get_tweet_timestamp"))
     
 
 def four_knight_user_friend():
+    print("START USER FRIEND")
     while True:
         get_user_ff(get_valid_user("get_friend_timestamp"), follower=False)
     
 
 def four_knight_user_follower():
+    print("START USER FOLLOWER")
     while True:
         get_user_ff(get_valid_user("get_follower_timestamp"), follower=True)
     
@@ -339,10 +343,10 @@ def four_knight_user_follower():
 """
 def runner():
     get_user_detail(968961194257039360)
-    Process(target=four_knight_user_like())
-    Process(target=four_knight_user_timeline())
-    Process(target=four_knight_user_friend())
-    Process(target=four_knight_user_follower())
+    Process(target=four_knight_user_like).start()
+    Process(target=four_knight_user_timeline).start()
+    Process(target=four_knight_user_friend).start()
+    Process(target=four_knight_user_follower).start()
 
     # get_user_detailのループを行う。最終動作より5分が経過したら実行させる。
     while True:
@@ -350,4 +354,5 @@ def runner():
         get_users_detail_in_follower()
 
 if __name__ == "__main__":
+    print("MAIN")
     runner()
