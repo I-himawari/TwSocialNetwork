@@ -4,8 +4,8 @@ import yaml
 import os
 import tweepy
 import os, sys
-print(os.getcwd())
 sys.path.append(os.getcwd())
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from index import *
 
 import itertools
@@ -14,11 +14,11 @@ import itertools
 class TestTwitterAPI(object):
 
     def db_reset(self):
-        db_follower.reset()
-        db_friend.reset()
-        db_like.reset()
-        db_user.reset()
-        db_tweet.reset()
+        db_follower.delete_many({})
+        db_friend.delete_many({})
+        db_like.delete_many({})
+        db_user.delete_many({})
+        db_tweet.delete_many({})
 
     def setup_method(self, method):
         self.db_reset()
@@ -30,15 +30,15 @@ class TestTwitterAPI(object):
     def test_get_user(self):
         self.db_reset()
         get_user_detail(968961194257039360)
-        assert len(db_user.search("get_follower_timestamp", 0)) == 1
+        assert len(list(db_user.find({"get_follower_timestamp": 0}))) == 1
 
         # フォロワー情報を取得する。
         get_user_ff(968961194257039360, follower=True)
-        assert len(db_follower.all()) != 0
+        assert len(list(db_follower.find())) != 0
 
         # フォロー情報を取得する。
         get_user_ff(968961194257039360, follower=False)
-        assert len(db_friend.all()) != 0
+        assert len(list(db_friend.find())) != 0
 
     """
     最適なユーザー情報を返すプログラムを検証する。（非DB依存）
@@ -82,20 +82,41 @@ class TestTwitterAPI(object):
     def test_lookup_users(self):
         self.db_reset()
         get_user_detail(968961194257039360)
-        db_follower.insert_multiple([{"to": 107736559}, {"to": 953125896822509568}])
-        db_friend.insert_multiple([{"to": 968961194257039360}, {"to": 953125896822509568}])
+        db_follower.insert_many([{"to": 107736559}, {"to": 953125896822509568}])
+        db_friend.insert_many([{"to": 968961194257039360}, {"to": 953125896822509568}])
         assert len(diff_ff_table_to_user_table()) == 2
 
         get_users_detail_in_follower()
-        assert len(db_user.all()) == 3
+        assert len(list(db_user.find())) == 3
 
     """
     タイムライン取得関数を動かす。
     """
     def test_get_user_tweet(self):
         get_user_timeline(968961194257039360)
-        assert len(db_tweet.all()) != 0
+        assert len(list(db_tweet.find())) != 0
 
     def test_get_user_like(self):
         get_user_like(968961194257039360)
-        assert len(db_like.all()) != 0
+        assert len(list(db_like.find())) != 0
+
+    """
+    有効なユーザーを返す。また、MongoDBのUpdateを確認する。
+    四騎士関数のテスト。
+    """
+    def test_valid_user(self):
+        self.db_reset()
+        users_mock = [{"id": 1}, {"id": 2}]
+        for v in TIMESTAMP_LIST:
+            for i in range(len(users_mock)):
+                users_mock[i][v] = now_timestamp()
+
+        users_mock[1]["get_like_timestamp"] = 0
+        db_user.insert_many(users_mock)
+
+        user = get_valid_user("get_like_timestamp")
+        assert user["id"] == 2
+
+        db_user.update_one({"id": user["id"]}, {"$set": {"get_like_timestamp": now_timestamp()}})
+        user = db_user.find_one({"id": 2})
+        assert user["get_like_timestamp"] != 0 

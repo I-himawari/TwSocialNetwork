@@ -1,5 +1,5 @@
 # Slackに現在取得したユーザー情報を投げる。
-import slack
+from slack import *
 from tinydb import TinyDB, Query, where
 from index import *
 
@@ -9,6 +9,6 @@ Tweet: %s
 Like: %s
 Friend: %s
 Follower: %s
-""" % (len(db_user.all()), len(db_tweet.all()), len(db_like.all()), len(db_friend.all()), len(db_follower.all()))
+""" % (db_user.count_documents({}), db_tweet.count_documents({}), db_like.count_documents({}), db_friend.count_documents({}), db_follower.count_documents({}))
 
 slack_message(db_prog)

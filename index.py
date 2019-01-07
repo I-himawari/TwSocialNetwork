@@ -10,28 +10,28 @@ import numpy as np
 import traceback
 import sys
 import argparse
-from sqjson import SqliteJson
+from pymongo import MongoClient
 
+DEBUG = False
+
+# 本来ならclass化して、__name__ == "__main__"の時のみ本番名で動かせればいいのだが。
 # ロギング（API取得情報）のログを保存する。
 logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
 
-# 引数に--prodをつけることにより、本番データベースを動かす事が出来る。
-parser = argparse.ArgumentParser()
-parser.add_argument("--prod", help="If you run own server, this flag mus set", action="store_true")
-args = parser.parse_args()
-
-if args.prod:
-    db_name = "db.sqlite3"
+if DEBUG:
+    db_name = "test_twitter"
 else:
-    db_name = "test_db.sqlite3"
+    db_name = "twitter"
 
-# DBの初期化
-db_follower = SqliteJson(db_name, "follower")
-db_friend = SqliteJson(db_name, "friend")
-db_like = SqliteJson(db_name, "like")
-db_user = SqliteJson(db_name, "user")
-db_tweet = SqliteJson(db_name, "tweet")
-    
+client = MongoClient('localhost', 27017)
+mongo_db = client[db_name]
+
+db_follower = mongo_db["follower"]
+db_friend = mongo_db["friend"]
+db_like = mongo_db["like"]
+db_user = mongo_db["user"]
+db_tweet = mongo_db["tweet"]
+
 
 f = open("api-key.yml", "r+")
 key = yaml.load(f)
@@ -44,6 +44,17 @@ api = tweepy.API(auth)
 
 TIMESTAMP_LIST = ["get_follower_timestamp", "get_friend_timestamp", "get_like_timestamp", "get_tweet_timestamp"]
 
+
+"""
+DBを完全に削除する（テスト用）
+"""
+def db_reset():
+    db_follower.delete_many({})
+    db_friend.delete_many({})
+    db_like.delete_many({})
+    db_user.delete_many({})
+    db_tweet.delete_many({})
+
 # 現在のtimestampを返す。
 def now_timestamp():
     return int(datetime.now().timestamp())
@@ -51,7 +62,7 @@ def now_timestamp():
 
 # DBにfrom_toの形のデータを入れる（つまりフォロー情報など）
 def db_insert_from_to(_db, _from, _to):
-    _db.insert(db_insert_param(_db, _from, _to))
+    _db.insert_one(db_insert_param(_db, _from, _to))
 
 # from_toの形のデータをDB用に変換する。
 def db_insert_param(_db, _from, _to):
@@ -90,8 +101,8 @@ def get_tweets(process_name, cursor):
 4. 複数件取得した場合は、最適なユーザーを返す関数を通して返す。
 """
 def get_valid_user(select_timestamp):
-    user_list = db_user.search(select_timestamp, 0)
-    get_users_detail_in_follower()
+    user_list = list(db_user.find({select_timestamp: 0}))
+    get_users_detail_in_follower()  # follow, followerの取得漏れを防ぐ。
 
     # 0件もヒットしなかった場合は、Slackに報告し、ランダムにユーザーを取得する。（お気に入りユーザー検索を続ける）。
     if len(user_list) == 0:
@@ -144,11 +155,11 @@ follower, friend内で、User詳細情報を取得していないユーザー一
 7. db.insert_multiple(UsersMod)
 """
 def diff_ff_table_to_user_table():
-    raw_user_list = [v["to"] for v in db_follower.all()]
-    raw_user_list.extend([v["to"] for v in db_friend.all()])
+    raw_user_list = [v["to"] for v in db_follower.find()]
+    raw_user_list.extend([v["to"] for v in db_friend.find()])
     
     # Usertable <- User詳細情報のDBよりid一覧
-    db_user_list = [v["id"] for v in db_user.all()]
+    db_user_list = [v["id"] for v in db_user.find()]
     
     return list(set(raw_user_list) - set(db_user_list))
 
@@ -199,7 +210,7 @@ def get_users_detail_in_follower():
 2. 存在しなかった場合は新しく取得する。
 """
 def screen_name_to_user_id(screen_name):
-    user = db_user.search("screen_name", screen_name)
+    user = db_user.find_one({"screen_name": screen_name})
     if len(user) == 0:
         get_user_detail(screen_name)
         screen_name_to_user_id(screen_name)
@@ -213,7 +224,7 @@ def screen_name_to_user_id(screen_name):
 def set_user_detail(user_object):
     for timestamp in TIMESTAMP_LIST:
         user_object[timestamp] = 0
-    db_user.insert(user_object)
+    db_user.insert_one(user_object)
 
 
 """
@@ -223,7 +234,7 @@ def set_users_detail(users_object):
     for i in range(len(users_object)):
         for timestamp in TIMESTAMP_LIST:
             users_object[i][timestamp] = 0
-    db_user.insert_multiple(users_object)
+    db_user.insert_many(users_object)
 
 
 """
@@ -252,7 +263,7 @@ def get_user_ff(user_id, follower=True):
     for p in c:
         l.append(db_insert_param(db_name, user_id, p))
 
-    db_name.insert_multiple(l)
+    db_name.insert_many(l)
 
 
 """
@@ -269,7 +280,7 @@ def get_user_action(user_id, page=1, tweet=True):
         c_modify = [v._json for v in c]
 
         db = db_tweet if tweet else db_like
-        db.insert_multiple(c_modify)
+        db.insert_many(c_modify)
             
         get_user_action(user_id, page+1, tweet=tweet)
 
@@ -299,25 +310,33 @@ def get_user_like(user_id, page=1):
 def four_knight_user_like():
     print("START USER LIKE")
     while True:
-        get_user_like(get_valid_user("get_like_timestamp"))
+        user = get_valid_user("get_like_timestamp")
+        get_user_like(user["id"])
+        db_user.update_one({"id": user["id"]}, {"$set": {"get_like_timestamp": now_timestamp()}})
     
 
 def four_knight_user_timeline():
     print("START USER TIMELINE")
     while True:
-        get_user_timeline(get_valid_user("get_tweet_timestamp"))
+        user = get_valid_user("get_tweet_timestamp")
+        get_user_timeline(user["id"])
+        db_user.update_one({"id": user["id"]}, {"$set": {"get_tweet_timestamp": now_timestamp()}})
     
 
 def four_knight_user_friend():
     print("START USER FRIEND")
     while True:
-        get_user_ff(get_valid_user("get_friend_timestamp"), follower=False)
+        user = get_valid_user("get_friend_timestamp")
+        get_user_ff(user["id"], follower=False)
+        db_user.update_one({"id": user["id"]}, {"$set": {"get_friend_timestamp": now_timestamp()}})
     
 
 def four_knight_user_follower():
     print("START USER FOLLOWER")
     while True:
-        get_user_ff(get_valid_user("get_follower_timestamp"), follower=True)
+        user = get_valid_user("get_follower_timestamp")
+        get_user_ff(user["id"], follower=True)
+        db_user.update_one({"id": user["id"]}, {"$set": {"get_follower_timestamp": now_timestamp()}})
     
 
 
