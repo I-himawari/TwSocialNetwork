@@ -25,11 +25,15 @@ class TestTwitterAPI(object):
         self.db_user.insert({"abc": 123})
         self.db_user.insert({"abc": 123})
         assert len(self.db_user.all()) == 3
+        assert self.db_user.all()[0]["abc"] == 123
 
     def test_insert_multiple_table(self):
         self.db_user.reset()
         
-        self.db_user.insert_multiple([{"abc": 123}, {"abc": 123}, {"abc": 123}])
+        self.db_user.insert_multiple([{"abc": 123}, {"abc": 810}, {"abc": 123}])
         assert len(self.db_user.all()) == 3
+
+        assert len(self.db_user.search("abc", 810)) == 1
+
 
     

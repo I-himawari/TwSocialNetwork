@@ -13,15 +13,12 @@ import itertools
 
 class TestTwitterAPI(object):
 
-    def db_remove_all(self, db):
-        db.remove(doc_ids=[v.doc_id for v in db.all()])
-
     def db_reset(self):
-        self.db_remove_all(db_follower)
-        self.db_remove_all(db_friend)
-        self.db_remove_all(db_like)
-        self.db_remove_all(db_user)
-        self.db_remove_all(db_tweet)
+        db_follower.reset()
+        db_friend.reset()
+        db_like.reset()
+        db_user.reset()
+        db_tweet.reset()
 
     def setup_method(self, method):
         self.db_reset()
@@ -33,7 +30,7 @@ class TestTwitterAPI(object):
     def test_get_user(self):
         self.db_reset()
         get_user_detail(968961194257039360)
-        assert len(db_user.search(where("get_follower_timestamp") == 0)) == 1
+        assert len(db_user.search("get_follower_timestamp", 0)) == 1
 
         # フォロワー情報を取得する。
         get_user_ff(968961194257039360, follower=True)
@@ -84,8 +81,6 @@ class TestTwitterAPI(object):
     """
     def test_lookup_users(self):
         self.db_reset()
-        db_follower.remove(doc_ids=[v+1 for v in range(len(db_follower.all()))])
-        db_friend.remove(doc_ids=[v+1 for v in range(len(db_friend.all()))])
         get_user_detail(968961194257039360)
         db_follower.insert_multiple([{"to": 107736559}, {"to": 953125896822509568}])
         db_friend.insert_multiple([{"to": 968961194257039360}, {"to": 953125896822509568}])

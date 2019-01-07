@@ -10,7 +10,10 @@ Run: ansible-playbook playbook/install.yml -i hosts --ask_become_pass
 
 
 # Database
-I was using TinyDB because simple.
+Using mongodb
+
+sudo service mongod start
+
 
 
 # エラー対処

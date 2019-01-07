@@ -43,6 +43,7 @@ class SqliteJson(object):
         """
         1つだけtableに挿入する。
         """
+        print(self.d(v))
         self.c.execute("insert into %s(json) values('%s')" % (self.table_name, self.d(v)))
         self.commit()
 
@@ -50,11 +51,15 @@ class SqliteJson(object):
         """
         複数情報をtableに挿入する。
         """
+        """
         l = ["('%s')," % self.d(v) for v in v_list]
         l = "".join(l)
         l = l[:-1] 
         self.c.execute("insert into %s(json) values %s" % (self.table_name, l))
         self.commit()
+        """
+        for v in v_list:
+            self.insert(v)
 
     def reset(self):
         """
@@ -63,8 +68,20 @@ class SqliteJson(object):
         self.c.execute("delete from %s" % self.table_name)
         self.commit()
 
+    def select_pre(self, param):
+        """
+        データを取得した後の処理（使う前の処理）を行う。例えばtupleをjsonに変換したり。
+        """
+        return [json.loads(v[0]) for v in list(param)]
+
     def all(self):
         """
         全てのJSON情報を返す
         """
-        return list(self.c.execute("select json from %s" % self.table_name))
+        return self.select_pre(self.c.execute("select json from %s" % self.table_name))
+
+    def search(self, where, equal):
+        """
+        JSONの検索結果を返す（whereがjson内の指定する要素、equalが取得する等価のオブジェクト（等価以外も出来るけど今の所はこれでやってる）
+        """
+        return self.select_pre(self.c.execute("select %s.json from %s, json_each(%s.json,'$.%s') where json_each.value == %s" % (self.table_name, self.table_name, self.table_name, where, equal)))

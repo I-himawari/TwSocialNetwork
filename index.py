@@ -10,6 +10,7 @@ import numpy as np
 import traceback
 import sys
 import argparse
+from sqjson import SqliteJson
 
 # ロギング（API取得情報）のログを保存する。
 logging.basicConfig(level=logging.DEBUG, filename="tweet.log", format="%(asctime)s %(levelname)-7s %(message)s")
@@ -19,26 +20,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--prod", help="If you run own server, this flag mus set", action="store_true")
 args = parser.parse_args()
 
-# DB保存先
-db_follower_name = "db/follower.json"
-db_friend_name = "db/friend.json"
-db_like_name = "db/like.json"
-db_user_name = "db/user.json"
-db_tweet_name = "db/tweet.json"
-
-if not args.prod:
-    db_follower_name = "test_" + db_follower_name
-    db_friend_name = "test_" + db_friend_name
-    db_like_name = "test_" + db_like_name
-    db_user_name = "test_" + db_user_name
-    db_tweet_name = "test_" + db_tweet_name
+if args.prod:
+    db_name = "db.sqlite3"
+else:
+    db_name = "test_db.sqlite3"
 
 # DBの初期化
-db_follower = TinyDB(db_follower_name)
-db_friend = TinyDB(db_friend_name)
-db_like = TinyDB(db_like_name)
-db_user = TinyDB(db_user_name)
-db_tweet = TinyDB(db_tweet_name)
+db_follower = SqliteJson(db_name, "follower")
+db_friend = SqliteJson(db_name, "friend")
+db_like = SqliteJson(db_name, "like")
+db_user = SqliteJson(db_name, "user")
+db_tweet = SqliteJson(db_name, "tweet")
+    
 
 f = open("api-key.yml", "r+")
 key = yaml.load(f)
@@ -97,7 +90,7 @@ def get_tweets(process_name, cursor):
 4. 複数件取得した場合は、最適なユーザーを返す関数を通して返す。
 """
 def get_valid_user(select_timestamp):
-    user_list = db_user.search(where(select_timestamp) == 0)
+    user_list = db_user.search(select_timestamp, 0)
     get_users_detail_in_follower()
 
     # 0件もヒットしなかった場合は、Slackに報告し、ランダムにユーザーを取得する。（お気に入りユーザー検索を続ける）。
@@ -199,9 +192,6 @@ def get_users_detail_in_follower():
     return True
     
 
-def lookup_users():
-    return api.lookup_users(screen_names=["vxtuberkarin", "factor_null"])
-
 """
 スクリーン名をユーザーIDに変換する。
 
@@ -209,11 +199,12 @@ def lookup_users():
 2. 存在しなかった場合は新しく取得する。
 """
 def screen_name_to_user_id(screen_name):
-    user = db_user.search(where("screen_name") == screen_name)
+    user = db_user.search("screen_name", screen_name)
     if len(user) == 0:
         get_user_detail(screen_name)
         screen_name_to_user_id(screen_name)
     return user[0]["id"]
+
 
 
 """
