@@ -1,0 +1,40 @@
+---
+  - hosts: all
+    become: yes
+    tasks:
+      - name: Install python3
+        apt:
+          name: "{{ packages }}" 
+          state: present 
+          update_cache: yes
+        vars:
+          packages:
+            - python3
+            - python3-pip
+      
+      - name: Install MongoDB(Get key)
+        apt_key:
+          keyserver: hkp://keyserver.ubuntu.com:80
+          id: 9DA31620334BD75D9DCB49F368818C72E52529D4
+      
+      - name: Install MongoDB(Set install dev)
+        copy:
+          content: 'deb [ arch=amd64 ] https://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/4.0 multiverse'
+          dest: /etc/apt/sources.list.d/mongodb-org-4.0.list
+
+      - name: Install MongoDB(apt-get)
+        apt:
+          name: "{{ packages }}"
+        vars:
+          packages:
+            - mongodb-org=4.0.5 
+            - mongodb-org-server=4.0.5 
+            - mongodb-org-shell=4.0.5 
+            - mongodb-org-mongos=4.0.5 
+            - mongodb-org-tools=4.0.5
+
+      - name: Start MongoDB
+        service:
+          name: mongod
+          state: started
+          enabled: yes

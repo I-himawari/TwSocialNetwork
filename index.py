@@ -182,14 +182,12 @@ def get_users_detail_in_follower():
     while(True):
         end_point = min(table_count + 100, len(before_table))
         try:
-            users_api = api.lookup_users(before_table[table_count:end_point])
+            users.extend(api.lookup_users(before_table[table_count:end_point]))
         except tweepy.RateLimitError:
             return False
         except tweepy.TweepError:
             slack_error_message(traceback.format_exc())
             return False
-
-        users.extend(api.lookup_users(before_table[table_count:end_point]))
 
         # 取得したいユーザー名一覧を座標が超えていたら終了。そうでなければ座標を100（取得数）ずらす。
         if table_count + 100 > end_point:

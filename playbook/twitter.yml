@@ -11,3 +11,8 @@
         pip:
           requirements: "{{ dir }}/requirements.txt"
           executable: pip3
+
+      - name: copy api-key.yml
+        copy:
+          src: ../api-key.yml
+          dest:  "{{ dir }}"
